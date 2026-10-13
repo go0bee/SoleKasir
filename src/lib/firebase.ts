@@ -5,25 +5,32 @@ import {
   connectFirestoreEmulator,
   memoryLocalCache,
 } from "firebase/firestore";
+import {
+  missingFirebaseVariables,
+  resolveFirebaseWebConfig,
+  usesFirebaseEmulators,
+} from "./firebase-config";
+import type { FirebaseWebConfig } from "./firebase-config";
+
+declare const __SOLEKASIR_FIREBASE_CONFIG__: FirebaseWebConfig;
 const env = import.meta.env;
-export const emulator = env.VITE_USE_EMULATORS === "true";
+const config =
+  typeof __SOLEKASIR_FIREBASE_CONFIG__ !== "undefined"
+    ? __SOLEKASIR_FIREBASE_CONFIG__
+    : resolveFirebaseWebConfig(env);
+export const emulator = usesFirebaseEmulators(env);
 export const configured =
-  emulator ||
-  !!(
-    env.FIREBASE_API_KEY &&
-    env.VITE_FIREBASE_PROJECT_ID &&
-    env.VITE_FIREBASE_APP_ID
-  );
+  emulator || missingFirebaseVariables(config).length === 0;
 export const defaultStoreId = env.VITE_STORE_ID || "main";
 export let storeId = defaultStoreId;
 export function setStoreId(value: string) {
   storeId = value;
 }
 const app = initializeApp({
-  apiKey: env.FIREBASE_API_KEY || "demo-key",
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || "demo-solekasir.firebaseapp.com",
-  projectId: env.VITE_FIREBASE_PROJECT_ID || "demo-solekasir",
-  appId: env.VITE_FIREBASE_APP_ID || "demo-app",
+  apiKey: config.apiKey || "demo-key",
+  authDomain: config.authDomain || "demo-solekasir.firebaseapp.com",
+  projectId: config.projectId || "demo-solekasir",
+  appId: config.appId || "demo-app",
 });
 export const auth = getAuth(app);
 auth.languageCode = "id";

@@ -67,6 +67,10 @@ Lihat [panduan penggunaan baru](docs/SUBSCRIPTIONS-INVOICES.md). Pemilik usaha d
 
 Detail order → Lihat nota menyediakan PNG/PDF, berbagi PNG, dan link invoice publik. Link tetap, berlaku 30 hari sejak diperbarui, dapat dicabut, dan berisi snapshot tagihan. Perbarui setelah pembayaran/perubahan order. File dibuat di perangkat tanpa upload Storage. Link localhost hanya untuk uji lokal; bagikan link dari domain HTTPS setelah deployment.
 
+## Deployment Vercel
+
+Lihat [konfigurasi Firebase dan redeploy Vercel](docs/VERCEL.md). Environment harus dipilih untuk Production/Preview yang sesuai dan baru berlaku setelah build ulang. Build memeriksa empat konfigurasi Firebase web sebelum menghasilkan aplikasi; `VITE_USE_EMULATORS=false` diperlukan untuk Vercel.
+
 ## Deployment Firebase Hosting dan custom domain
 
 ```powershell
