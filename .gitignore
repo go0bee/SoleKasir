@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output and caches
+dist/
+.vite/
+*.tsbuildinfo
+.eslintcache
+
+# Local environment variables (keep the setup template)
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Firebase local state and emulator exports
+.firebase/
+emulator-data/
+firebase-export-*/
+
+# Service account credentials
+service-account*.json
+serviceAccount*.json
+*-firebase-adminsdk-*.json
+
+# Logs and generated test artifacts
+*.log
+artifacts/
+coverage/
+playwright-report/
+test-results/
+
+# Editor and operating system files
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,299 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function root(s) { return /databases/$(database)/documents/stores/$(s); }
+  function member(s) { return request.auth != null && exists(/databases/$(database)/documents/stores/$(s)/members/$(request.auth.uid)) && get(/databases/$(database)/documents/stores/$(s)/members/$(request.auth.uid)).data.active == true; }
+  function subscriptionActive(s) {
+   let p=/databases/$(database)/documents/stores/$(s)/subscription/access;
+   return !exists(p) ? s=='main' : (get(p).data.status=='active' && get(p).data.expiresAt>request.time);
+  }
+  function staff(s) { return member(s) && get(/databases/$(database)/documents/stores/$(s)/members/$(request.auth.uid)).data.role in ['owner','kasir'] && subscriptionActive(s); }
+  function owner(s) { return staff(s) && get(/databases/$(database)/documents/stores/$(s)/members/$(request.auth.uid)).data.role == 'owner'; }
+  function platformAdmin() { return request.auth != null && exists(/databases/$(database)/documents/platformAdmins/$(request.auth.uid)) && get(/databases/$(database)/documents/platformAdmins/$(request.auth.uid)).data.active==true; }
+  function text(x,n) { return x is string && x.size() <= n; }
+  function amount(x) { return x is int && x >= 0 && x <= 100000000; }
+  function event(s,o,e) { return getAfter(/databases/$(database)/documents/stores/$(s)/orders/$(o)/events/$(e)).data; }
+  function payment(s,p) { return getAfter(/databases/$(database)/documents/stores/$(s)/payments/$(p)).data; }
+  function before(s,o) { return get(/databases/$(database)/documents/stores/$(s)/orders/$(o)).data; }
+  function after(s,o) { return getAfter(/databases/$(database)/documents/stores/$(s)/orders/$(o)).data; }
+  function sumPrice(a,n) { return a.size()>n ? a[n].price : 0; }
+  function ready(a,n) { return a.size()>n && a[n].status >= 4 ? 1 : 0; }
+  function estimate(a,n) { return a.size()>n && a[n].status < 4 ? a[n].dueAt : timestamp.date(2099,1,1); }
+  function min2(a,b) { return a < b ? a : b; }
+  function earliest(a) {
+   let t0=estimate(a,0); let t1=estimate(a,1); let t2=estimate(a,2); let t3=estimate(a,3);
+   let m01=min2(t0,t1); let m23=min2(t2,t3);
+   return min2(m01,m23);
+  }
+  function validItem(i) {
+   return i.keys().hasAll(['id','description','color','material','size','condition','accessories','serviceId','serviceName','price','notes','dueAt','status','rack'])
+    && i.keys().hasOnly(['id','description','color','material','size','condition','accessories','serviceId','serviceName','price','notes','dueAt','status','rack'])
+    && text(i.id,80) && i.id.size()>0 && text(i.description,160) && i.description.size()>0 && text(i.color,80) && i.color.size()>0
+    && text(i.material,80) && text(i.size,40) && text(i.condition,1000) && i.condition.size()>0 && text(i.accessories,300)
+    && text(i.serviceId,80) && text(i.serviceName,100) && amount(i.price) && text(i.notes,1000) && i.dueAt is timestamp
+    && i.status is int && i.status>=0 && i.status<=5 && text(i.rack,80);
+  }
+  function itemMirror(s,o,a,n) {
+   return a.size()<=n || a[n]==getAfter(/databases/$(database)/documents/stores/$(s)/orders/$(o)/items/$(string(n+1))).data;
+  }
+  function createItem(s,o,slot,i) {
+   let svc=get(/databases/$(database)/documents/stores/$(s)/services/$(i.serviceId)).data;
+   let order=after(s,o);
+   return slot in ['1','2','3','4'] && validItem(i) && i.id==o+'-'+slot && i.status==0 && i.dueAt>=request.time
+    && svc.active && i.price==svc.price && i.serviceName==svc.name && order.createdAt==request.time
+    && order.version==1 && order.items[int(slot)-1]==i;
+  }
+  function changeItem(s,o,slot,a,b) {
+   let order=after(s,o);
+   let old=before(s,o);
+   let e=event(s,o,order.lastEventId);
+   return old.active && order.version==old.version+1 && order.items[int(slot)-1]==a
+    && a.diff(b).affectedKeys().hasOnly(['status','notes','rack']) && a.status is int && text(a.notes,1000) && text(a.rack,80)
+    && ((e.kind=='collect' && old.allReady && old.balance==0 && a.status==5 && b.status==4)
+     || (e.kind=='status' && a.status>=0 && a.status<=4
+      && ((owner(s) && (a.status>=b.status || e.reason.size()>0)) || (a.status>=b.status && a.status<=b.status+1))));
+  }
+  function orderShape(d) {
+   return d.keys().hasOnly(['number','customerId','customerName','customerPhone','items','itemCount','readyCount','allReady','dueAt','subtotal','discount','total','paid','balance','cancelled','collected','active','notes','createdBy','createdAt','updatedAt','version','lastEventId'])
+    && text(d.customerId,80)
+    && d.items is list && d.items.size()>=1 && d.items.size()<=4 && d.itemCount==d.items.size()
+    && d.subtotal==d.items[0].price+(d.items.size()>1?d.items[1].price:0)+(d.items.size()>2?d.items[2].price:0)+(d.items.size()>3?d.items[3].price:0)
+    && amount(d.subtotal) && amount(d.discount) && d.discount<=d.subtotal && d.total is int && d.total==d.subtotal-d.discount
+    && amount(d.paid) && d.paid<=d.total && d.balance is int && d.balance==d.total-d.paid
+    && d.readyCount is int && d.readyCount==0 && d.allReady==false && d.dueAt==earliest(d.items)
+    && d.active==(!d.cancelled && !d.collected)
+    && text(d.notes,1000) && d.updatedAt==request.time
+    && d.version is int && text(d.lastEventId,80);
+  }
+  function eventShape(e) {
+   return e.keys().hasOnly(['kind','reason','actor','createdAt','beforeVersion','afterVersion','paymentId','itemsBefore','itemsAfter'])
+    && e.kind in ['create','status','collect','cancel','payment','refund','void'] && text(e.reason,1000) && e.actor==request.auth.uid
+    && e.createdAt==request.time && e.beforeVersion is int && e.afterVersion==e.beforeVersion+1 && text(e.paymentId,80)
+    && e.itemsBefore is list && e.itemsBefore.size()<=4 && e.itemsAfter is list && e.itemsAfter.size()<=4;
+  }
+  function linkedEvent(s,o,d,version) {
+   let e=event(s,o,d.lastEventId);
+   return e.actor==request.auth.uid && e.createdAt==request.time && e.beforeVersion==version && e.afterVersion==d.version;
+  }
+  function paymentShape(p) {
+   return p.keys().hasAll(['orderId','kind','amount','method','tendered','change','reason','refId','createdBy','createdAt','orderVersion'])
+    && p.keys().hasOnly(['orderId','kind','amount','method','tendered','change','reason','refId','createdBy','createdAt','orderVersion'])
+    && text(p.orderId,80) && p.kind in ['payment','refund','void'] && amount(p.amount) && p.amount>0
+    && p.method in ['tunai','transfer','qris'] && amount(p.tendered) && amount(p.change) && text(p.reason,1000) && text(p.refId,80)
+    && p.createdBy==request.auth.uid && p.createdAt==request.time && p.orderVersion is int
+    && (p.kind=='payment' ? (p.refId=='' && p.tendered>=p.amount && p.change==p.tendered-p.amount && (p.method=='tunai' || (p.tendered==p.amount && p.change==0))) : (p.reason.size()>0 && p.change==0 && p.tendered==p.amount));
+  }
+  function reversal(s,p,id) {
+   let original=get(/databases/$(database)/documents/stores/$(s)/payments/$(p.refId)).data;
+   let marker=getAfter(/databases/$(database)/documents/stores/$(s)/voids/$(p.refId)).data;
+   return original.kind=='payment' && original.orderId==p.orderId && original.amount==p.amount
+    && !exists(/databases/$(database)/documents/stores/$(s)/voids/$(p.refId)) && marker.reversalId==id && marker.orderId==p.orderId;
+  }
+  function paymentChange(s,o,a,b,e) {
+   let p=payment(s,e.paymentId);
+   return a.diff(b).affectedKeys().hasOnly(['paid','balance','version','lastEventId','updatedAt']) && amount(a.paid) && a.paid<=a.total && a.balance is int && a.balance==a.total-a.paid && e.itemsBefore==[] && e.itemsAfter==[]
+    && !exists(/databases/$(database)/documents/stores/$(s)/payments/$(e.paymentId)) && e.paymentId==a.lastEventId
+    && p.orderId==o && p.orderVersion==a.version && e.kind==p.kind && e.reason==p.reason
+    && (p.kind=='payment' ? (b.active && a.paid==b.paid+p.amount) : (owner(s) && a.paid==b.paid-p.amount
+      && (p.kind=='refund' ? p.refId=='' : (!b.collected && reversal(s,p,e.paymentId)))));
+  }
+  function initialOrder(s,o,d) {
+   let c=get(/databases/$(database)/documents/stores/$(s)/customers/$(d.customerId)).data;
+   let e=event(s,o,d.lastEventId);
+   return orderShape(d) && d.version==1 && d.createdBy==request.auth.uid && d.createdAt==request.time
+    && !d.cancelled && !d.collected && d.customerName==c.name && d.customerPhone==c.phone
+    && d.number.matches('[A-Z0-9]{2,6}-[0-9]{6}-[A-F0-9]{8}')
+    && getAfter(/databases/$(database)/documents/stores/$(s)/orderNumbers/$(d.number)).data.orderId==o
+    && e.actor==request.auth.uid && e.createdAt==request.time && e.beforeVersion==0 && e.afterVersion==1
+    && e.kind=='create' && e.reason=='' && e.itemsBefore==[] && e.itemsAfter==d.items
+    && (d.paid==0 ? e.paymentId=='' : (e.paymentId==d.lastEventId
+      && payment(s,e.paymentId).kind=='payment' && payment(s,e.paymentId).orderId==o && payment(s,e.paymentId).amount==d.paid && payment(s,e.paymentId).orderVersion==1))
+    && itemMirror(s,o,d.items,0) && itemMirror(s,o,d.items,1) && itemMirror(s,o,d.items,2) && itemMirror(s,o,d.items,3);
+  }
+  function updateOrder(s,o,a,b) {
+   let e=event(s,o,a.lastEventId);
+   let collect=e.kind=='collect';
+   return a.updatedAt==request.time && a.version is int && a.version==b.version+1 && linkedEvent(s,o,a,b.version)
+    && ((e.kind in ['payment','refund','void'] && paymentChange(s,o,a,b,e))
+     || (e.kind=='cancel' && owner(s) && b.active && e.reason.size()>0 && e.paymentId=='' && a.cancelled && !a.active && e.itemsBefore==[] && e.itemsAfter==[]
+      && a.diff(b).affectedKeys().hasOnly(['cancelled','active','version','lastEventId','updatedAt']))
+     || (e.kind in ['status','collect'] && b.active && e.paymentId=='' && a.items.size()==b.items.size() && e.itemsBefore==b.items && e.itemsAfter==a.items
+      && a.readyCount is int && a.readyCount==ready(a.items,0)+ready(a.items,1)+ready(a.items,2)+ready(a.items,3) && a.allReady==(a.readyCount==a.itemCount) && a.dueAt==earliest(a.items)
+      && a.diff(b).affectedKeys().hasOnly(collect?['items','collected','active','version','lastEventId','updatedAt']:['items','readyCount','allReady','dueAt','version','lastEventId','updatedAt'])
+      && (!collect || (b.allReady && b.balance==0 && a.collected && !a.active))
+      && itemMirror(s,o,a.items,0) && itemMirror(s,o,a.items,1) && itemMirror(s,o,a.items,2) && itemMirror(s,o,a.items,3)));
+  }
+  match /stores/{s} {
+   allow read,write: if false;
+   match /members/{uid} {
+    allow get: if request.auth!=null && request.auth.uid==uid; allow list: if false;
+    allow create: if platformAdmin() && request.resource.data=={'role':'owner','name':get(/databases/$(database)/documents/applications/$(uid)).data.name,'active':true}
+     && getAfter(/databases/$(database)/documents/applications/$(uid)).data.status=='approved'
+     && getAfter(/databases/$(database)/documents/applications/$(uid)).data.storeId==s
+     && getAfter(/databases/$(database)/documents/accounts/$(uid)).data.storeId==s;
+   }
+   match /subscription/access {
+    allow get: if member(s) || platformAdmin(); allow list: if false;
+    allow create: if platformAdmin() && validSubscription(request.resource.data)
+     && request.resource.data.status=='active' && request.resource.data.reason==''
+     && request.resource.data.approvedBy==request.auth.uid && request.resource.data.approvedAt==request.time
+     && getAfter(/databases/$(database)/documents/applications/$(request.resource.data.ownerUid)).data.status=='approved'
+     && getAfter(/databases/$(database)/documents/applications/$(request.resource.data.ownerUid)).data.storeId==s;
+    allow update: if platformAdmin() && validSubscription(request.resource.data)
+     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','expiresAt','updatedAt','reason']);
+   }
+   match /invoiceLinks/{o} {
+    allow get: if staff(s); allow list: if false;
+    allow create,update: if staff(s) && request.resource.data.keys().hasAll(['token']) && request.resource.data.keys().hasOnly(['token'])
+     && request.resource.data.token.matches('[a-f0-9]{64}')
+     && getAfter(/databases/$(database)/documents/invoiceShares/$(request.resource.data.token)).data.storeId==s
+     && getAfter(/databases/$(database)/documents/invoiceShares/$(request.resource.data.token)).data.orderId==o;
+   }
+   match /settings/general {
+    allow read: if staff(s);
+    allow create,update: if (owner(s) || platformAdmin()) && request.resource.data.keys().hasAll(['name','address','phone','hours','terms','receivedTemplate','readyTemplate','prefix'])
+     && request.resource.data.keys().hasOnly(['name','address','phone','hours','terms','receivedTemplate','readyTemplate','prefix'])
+     && text(request.resource.data.name,160) && request.resource.data.name.size()>0 && text(request.resource.data.address,500)
+     && text(request.resource.data.phone,16) && (request.resource.data.phone=='' || request.resource.data.phone.matches('628[0-9]{8,11}'))
+     && text(request.resource.data.hours,160) && text(request.resource.data.terms,3000) && text(request.resource.data.receivedTemplate,2000)
+     && text(request.resource.data.readyTemplate,2000) && request.resource.data.prefix.matches('[A-Z0-9]{2,6}');
+   }
+   match /services/{id} {
+    allow read: if staff(s);
+    allow create,update: if owner(s) && request.resource.data.keys().hasAll(['name','price','days','description','active'])
+     && request.resource.data.keys().hasOnly(['name','price','days','description','active']) && text(request.resource.data.name,100)
+     && request.resource.data.name.size()>0 && amount(request.resource.data.price) && request.resource.data.days is int
+     && request.resource.data.days>=1 && request.resource.data.days<=90 && text(request.resource.data.description,1000) && request.resource.data.active is bool;
+   }
+   match /customers/{id} {
+    allow read: if staff(s);
+    allow create,update: if staff(s) && request.resource.data.keys().hasAll(['name','nameLower','phone','notes','createdAt'])
+     && request.resource.data.keys().hasOnly(['name','nameLower','phone','notes','createdAt']) && text(request.resource.data.name,160)
+     && request.resource.data.name.size()>0 && request.resource.data.nameLower==request.resource.data.name.lower()
+     && request.resource.data.phone.matches('628[0-9]{8,11}') && text(request.resource.data.notes,1000)
+     && (!exists(/databases/$(database)/documents/stores/$(s)/customers/$(id)) ? request.resource.data.createdAt==request.time : request.resource.data.createdAt==resource.data.createdAt)
+     && getAfter(/databases/$(database)/documents/stores/$(s)/phones/$(request.resource.data.phone)).data.customerId==id
+     && (!exists(/databases/$(database)/documents/stores/$(s)/customers/$(id)) || request.resource.data.phone==resource.data.phone || !existsAfter(/databases/$(database)/documents/stores/$(s)/phones/$(resource.data.phone)));
+   }
+   match /phones/{phone} {
+    allow get: if staff(s); allow list: if false;
+    allow create: if staff(s) && request.resource.data.keys().hasOnly(['customerId'])
+     && getAfter(/databases/$(database)/documents/stores/$(s)/customers/$(request.resource.data.customerId)).data.phone==phone;
+    allow delete: if staff(s) && getAfter(/databases/$(database)/documents/stores/$(s)/customers/$(resource.data.customerId)).data.phone!=phone;
+   }
+   match /orderNumbers/{number} {
+    allow get: if staff(s); allow list: if false;
+    allow create: if staff(s) && request.resource.data.keys().hasOnly(['orderId','createdAt']) && request.resource.data.createdAt==request.time
+     && number.matches(get(/databases/$(database)/documents/stores/$(s)/settings/general).data.prefix+'-[0-9]{6}-[A-F0-9]{8}')
+     && after(s,request.resource.data.orderId).number==number && after(s,request.resource.data.orderId).createdAt==request.time;
+   }
+   match /orders/{o} {
+    allow read: if staff(s);
+    allow create: if staff(s) && initialOrder(s,o,request.resource.data);
+    allow update: if staff(s) && updateOrder(s,o,request.resource.data,resource.data);
+    match /items/{slot} {
+     allow read: if staff(s);
+     allow create: if staff(s) && createItem(s,o,slot,request.resource.data);
+     allow update: if staff(s) && changeItem(s,o,slot,request.resource.data,resource.data);
+    }
+    match /events/{e} {
+     allow read: if staff(s);
+     allow create: if staff(s) && eventShape(request.resource.data) && after(s,o).lastEventId==e && after(s,o).version==request.resource.data.afterVersion
+      && (exists(/databases/$(database)/documents/stores/$(s)/orders/$(o)) ? before(s,o).version==request.resource.data.beforeVersion : request.resource.data.beforeVersion==0);
+    }
+    match /payments/{p} {
+     allow read: if staff(s);
+     allow create: if staff(s) && request.resource.data==payment(s,p) && request.resource.data.orderId==o
+      && after(s,o).lastEventId==p && after(s,o).version==request.resource.data.orderVersion;
+    }
+   }
+   match /payments/{p} {
+    function todayStart(){ return request.time.toMillis()-((request.time.toMillis()+25200000)%86400000); }
+    allow read: if staff(s) && (owner(s) || (resource.data.createdAt>=timestamp.value(todayStart()) && resource.data.createdAt<timestamp.value(todayStart()+86400000)));
+    allow create: if staff(s) && paymentShape(request.resource.data) && after(s,request.resource.data.orderId).lastEventId==p
+     && after(s,request.resource.data.orderId).version==request.resource.data.orderVersion
+     && getAfter(/databases/$(database)/documents/stores/$(s)/orders/$(request.resource.data.orderId)/payments/$(p)).data==request.resource.data
+     && (request.resource.data.kind=='payment' || owner(s));
+   }
+   match /voids/{p} {
+    allow read: if owner(s);
+    allow create: if owner(s) && request.resource.data.keys().hasOnly(['orderId','reversalId','createdAt']) && request.resource.data.createdAt==request.time
+     && payment(s,request.resource.data.reversalId).refId==p && payment(s,request.resource.data.reversalId).kind=='void'
+     && payment(s,request.resource.data.reversalId).orderId==request.resource.data.orderId;
+   }
+   match /expenses/{id} {
+    allow read: if owner(s);
+    allow create: if owner(s) && request.resource.data.keys().hasAll(['description','amount','createdAt','createdBy'])
+     && request.resource.data.keys().hasOnly(['description','amount','createdAt','createdBy']) && text(request.resource.data.description,500)
+     && request.resource.data.description.size()>0 && amount(request.resource.data.amount) && request.resource.data.amount>0
+     && request.resource.data.createdAt==request.time && request.resource.data.createdBy==request.auth.uid;
+   }
+  }
+  function validApplication(d) {
+   return d.keys().hasAll(['name','email','phone','businessName','address','status','storeId','reason','createdAt','reviewedAt','reviewedBy'])
+    && d.keys().hasOnly(['name','email','phone','businessName','address','status','storeId','reason','createdAt','reviewedAt','reviewedBy'])
+    && text(d.name,160) && d.name.size()>0 && text(d.email,254) && d.email.size()>0 && d.phone.matches('628[0-9]{8,11}')
+    && text(d.businessName,160) && d.businessName.size()>0 && text(d.address,500) && text(d.reason,1000);
+  }
+  function validSubscription(d) {
+   return d.keys().hasAll(['status','ownerUid','expiresAt','approvedBy','approvedAt','updatedAt','reason'])
+    && d.keys().hasOnly(['status','ownerUid','expiresAt','approvedBy','approvedAt','updatedAt','reason'])
+    && d.status in ['active','suspended'] && text(d.ownerUid,128) && text(d.approvedBy,128) && d.approvedAt is timestamp
+    && d.expiresAt is timestamp && d.expiresAt<=request.time+duration.value(366,'d')
+    && (d.status=='suspended' || d.expiresAt>request.time) && text(d.reason,1000) && (d.status=='active' || d.reason.size()>0) && d.updatedAt==request.time;
+  }
+  match /platformAdmins/{uid} { allow get: if request.auth!=null && request.auth.uid==uid; allow list,write: if false; }
+  match /accounts/{uid} {
+   allow get: if (request.auth!=null && request.auth.uid==uid) || platformAdmin(); allow list: if false;
+   allow create: if platformAdmin() && request.resource.data.keys().hasAll(['storeId']) && request.resource.data.keys().hasOnly(['storeId'])
+    && request.resource.data.storeId=='business-'+uid
+    && getAfter(/databases/$(database)/documents/applications/$(uid)).data.status=='approved'
+    && getAfter(/databases/$(database)/documents/applications/$(uid)).data.storeId==request.resource.data.storeId;
+  }
+  match /applications/{uid} {
+   allow get: if (request.auth!=null && request.auth.uid==uid) || platformAdmin(); allow list: if platformAdmin();
+   allow create: if request.auth!=null && request.auth.uid==uid && validApplication(request.resource.data)
+    && request.resource.data.email==request.auth.token.email && request.resource.data.status=='pending' && request.resource.data.storeId==''
+    && request.resource.data.reason=='' && request.resource.data.reviewedAt==null && request.resource.data.reviewedBy=='' && request.resource.data.createdAt==request.time;
+   allow update: if platformAdmin() && validApplication(request.resource.data) && resource.data.status=='pending'
+    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','storeId','reason','reviewedAt','reviewedBy'])
+    && request.resource.data.reviewedAt==request.time && request.resource.data.reviewedBy==request.auth.uid
+    && (request.resource.data.status=='rejected' ? (request.resource.data.reason.size()>0 && request.resource.data.storeId=='') :
+     (request.resource.data.status=='approved' && request.resource.data.reason=='' && request.resource.data.storeId=='business-'+uid
+      && getAfter(/databases/$(database)/documents/accounts/$(uid)).data.storeId==request.resource.data.storeId
+      && getAfter(/databases/$(database)/documents/stores/$(request.resource.data.storeId)/members/$(uid)).data.role=='owner'
+      && getAfter(/databases/$(database)/documents/stores/$(request.resource.data.storeId)/subscription/access).data.ownerUid==uid));
+  }
+  function publicItem(a,b) {
+   return a.keys().hasAll(['description','color','serviceName','price','dueAt']) && a.keys().hasOnly(['description','color','serviceName','price','dueAt'])
+    && a.description==b.description && a.color==b.color && a.serviceName==b.serviceName && a.price==b.price && a.dueAt==b.dueAt;
+  }
+  function invoiceItem(a,b,n) { return a.size()<=n || publicItem(a[n],b[n]); }
+  function snapshotMatches(d,s,o) {
+   let order=before(s,o); let settings=get(/databases/$(database)/documents/stores/$(s)/settings/general).data;
+   return d.keys().hasAll(['store','number','date','customerName','items','subtotal','discount','total','paid','balance','cancelled','collected'])
+    && d.keys().hasOnly(['store','number','date','customerName','items','subtotal','discount','total','paid','balance','cancelled','collected'])
+    && d.store=={'name':settings.name,'address':settings.address,'phone':settings.phone,'hours':settings.hours,'terms':settings.terms}
+    && d.number==order.number && d.date==order.createdAt && d.customerName==order.customerName
+    && d.items is list && d.items.size()==order.items.size() && invoiceItem(d.items,order.items,0) && invoiceItem(d.items,order.items,1) && invoiceItem(d.items,order.items,2) && invoiceItem(d.items,order.items,3)
+    && d.subtotal==order.subtotal && d.discount==order.discount && d.total==order.total && d.paid==order.paid && d.balance==order.balance && d.cancelled==order.cancelled && d.collected==order.collected;
+  }
+  function validShare(d,token) {
+   return token.matches('[a-f0-9]{64}') && d.keys().hasAll(['storeId','orderId','snapshot','enabled','createdAt','updatedAt','expiresAt','createdBy'])
+    && d.keys().hasOnly(['storeId','orderId','snapshot','enabled','createdAt','updatedAt','expiresAt','createdBy']) && text(d.storeId,180) && text(d.orderId,80)
+    && d.enabled is bool && d.createdAt is timestamp && d.updatedAt==request.time && d.expiresAt is timestamp
+    && d.expiresAt>request.time && d.expiresAt<=request.time+duration.value(31,'d') && snapshotMatches(d.snapshot,d.storeId,d.orderId);
+  }
+  match /invoiceShares/{token} {
+   allow get: if (resource.data.enabled && resource.data.expiresAt>request.time) || staff(resource.data.storeId); allow list: if false;
+   allow create: if staff(request.resource.data.storeId) && validShare(request.resource.data,token)
+    && request.resource.data.createdAt==request.time && request.resource.data.createdBy==request.auth.uid
+    && getAfter(/databases/$(database)/documents/stores/$(request.resource.data.storeId)/invoiceLinks/$(request.resource.data.orderId)).data.token==token;
+   allow update: if staff(resource.data.storeId)
+    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['snapshot','enabled','updatedAt','expiresAt'])
+    && (request.resource.data.enabled ? validShare(request.resource.data,token) :
+     (request.resource.data.enabled==false && request.resource.data.updatedAt==request.time && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['enabled','updatedAt'])));
+  }
+  match /{document=**} { allow read,write: if false; }
+ }
+}
