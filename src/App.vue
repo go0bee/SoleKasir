@@ -15,17 +15,22 @@ watch(() => [session.user?.uid, session.activeStoreId, session.accessState], () 
 const standalone = computed(() => route.meta.public || route.meta.account || (route.meta.admin && session.platformAdmin && (!session.member || session.accessState !== 'active')))
 const routeReady = ref(false)
 void router.isReady().then(() => { routeReady.value = true })
-watch(() => [routeReady.value, session.loading, session.accessState, session.user?.uid, route.path], () => {
- if (!routeReady.value || !route.matched.length) return
- if (!session.loading && !route.meta.public && !route.meta.account && !route.meta.admin && (!session.user || !session.member || session.accessState !== 'active')) void router.replace(session.user ? '/pending' : '/login')
- if (!session.loading && route.meta.admin && !session.platformAdmin) void router.replace(session.user ? '/pending' : '/login')
+watch(() => [routeReady.value, session.loading, session.accessState, session.user?.uid, session.platformAdmin, route.path], () => {
+ if (!routeReady.value || !route.matched.length || session.loading) return
+ if (route.meta.account && !session.user) { void router.replace('/login'); return }
+ if (session.user && (route.path === '/login' || route.path === '/signup' || (route.path === '/pending' && ((session.member && session.accessState === 'active') || session.platformAdmin)))) {
+  void router.replace(session.member && session.accessState === 'active' ? '/' : session.platformAdmin ? '/admin/subscriptions' : '/pending')
+  return
+ }
+ if (!route.meta.public && !route.meta.account && !route.meta.admin && (!session.user || !session.member || session.accessState !== 'active')) void router.replace(session.user ? '/pending' : '/login')
+ if (route.meta.admin && !session.platformAdmin) void router.replace(session.user ? '/pending' : '/login')
 })
 const navigation = [ {to:'/',label:'Beranda',icon:House}, {to:'/orders',label:'Order',icon:ClipboardList}, {to:'/orders/new',label:'Buat Order',icon:Plus}, {to:'/customers',label:'Pelanggan',icon:Users}, {to:'/more',label:'Lainnya',icon:Menu} ]
 const initials = computed(() => (session.member?.name || session.user?.email || 'S').split(' ').map(x => x[0]).slice(0,2).join('').toUpperCase())
 function active(to: string) { return to === '/' ? route.path === '/' : to === '/orders' ? route.path.startsWith('/orders') && route.path !== '/orders/new' : route.path.startsWith(to) }
 </script>
 <template>
- <RouterView v-if="standalone" :key="route.fullPath + session.activeStoreId" />
+ <RouterView v-if="standalone" :key="route.fullPath + session.activeStoreId + (session.user?.uid || 'guest')" />
  <div v-else-if="session.member && session.accessState === 'active'" class="app-shell">
   <aside class="sidebar no-print">
    <RouterLink to="/" class="brand"><span class="brand-mark"><Footprints :size="25" /></span><span>{{ settings.name }}<small>Rapi sepatu, rapi usaha.</small></span></RouterLink>
@@ -40,7 +45,7 @@ function active(to: string) { return to === '/' ? route.path === '/' : to === '/
    <header class="topbar no-print"><div class="breadcrumb"><span class="desktop-only">Ruang kerja <span class="slash">/</span></span><strong>{{ route.meta.title }}</strong></div><div class="topbar-right"><span class="connection" :class="{'offline':!session.online}"><i />{{ session.online ? 'Terhubung' : 'Offline' }}</span><span class="today desktop-only">{{ dateTime(Date.now()).split(',')[0] }}</span><span class="avatar small">{{ initials }}</span></div></header>
    <div v-if="!session.online" class="offline-banner no-print" role="alert"><WifiOff :size="19" /><span>Koneksi terputus. Order, pembayaran, dan perubahan hanya dapat disimpan saat online.</span></div>
    <div v-if="settingsError" class="notice no-print">{{ settingsError }}</div>
-   <main id="main" class="main-content"><RouterView :key="route.fullPath + session.activeStoreId" /></main>
+   <main id="main" class="main-content"><RouterView :key="route.fullPath + session.activeStoreId + (session.user?.uid || 'guest')" /></main>
    <footer class="workspace-footer no-print"><span>{{ settings.name }} <span class="dot">·</span> Dibuat untuk langkah yang lebih baik.</span><span>Asia/Jakarta</span></footer>
   </div>
   <nav class="mobile-nav no-print" aria-label="Navigasi utama mobile"><RouterLink v-for="nav in navigation" :key="nav.to" :to="nav.to" :class="{active:active(nav.to), 'mobile-create':nav.to==='/orders/new'}"><span><component :is="nav.icon" :size="21" /></span><small>{{ nav.label }}</small></RouterLink></nav>

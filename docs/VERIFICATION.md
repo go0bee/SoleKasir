@@ -45,3 +45,17 @@ Bukti visual: dashboard-desktop.jpg, dashboard-mobile.jpg, login-desktop.jpg, mo
 
 
 - Pemeriksaan desain PASS pada 375, 768, 1440px. Dua refinement (form kata sandi tablet dan main admin bersarang) diperbaiki; screenshot baru dan DOM diperiksa kembali. Evaluator menggunakan provider yang tersedia karena provider lain tidak tersedia; pemeriksaan kedua memakai screenshot root karena sesi browser evaluator tidak tersedia. Ekspor invoice internal kini membaca order/settings dari server sebelum membuat file; public export tetap snapshot.
+
+## Auth Google dan nomor: 13 Oktober 2026
+- npm test: 12/12 lulus (6 domain + 6 orchestration Auth). Memeriksa kode salahformat/salahFirebase/retry, cleanupchallenge, offline, akun berubah saatpenautan, popup/redirect dan pesan collision.
+- Firestore rules/integration: 27/27 lulus, termasuk Google pending, phone-only nomor verified, penolakan nomor palsu/tanpaidentity, kontakemailadmin tidak memberiakses, approvalphoneatomik.
+- Firebase Auth SDK emulator: 3/3 lulus, Googlecredentialverifiedidentity tetap pending, OTPwrong/right phone-onlysignup, linkGoogle+phone UID tetap danloginulang melalui nomor. PhoneCredential di test memakai browserSDKentry karena NodeAuth mengekspos providerphoneunsupported.
+- Build aplikasi, TypeScript, bundling danPWA lulus. Firebase12.19.0 danformatlib/firebase perubahanpengguna dipertahankan. Firebaseconfigreal .env.local serta .firebaserc milikpengguna tidak diganti.
+- BrowserQA dilakukan pada port5174 dengan .env.authqa.local demo-solekasir. SDKRecaptchaVerifierfake hanya saatflag emulator dan auth.emulatorConfig nyata. TidakmengirimSMSproduksi.
+- Browser: nomorQA +6281999900013 → kodeemulator, 000000ditolakpesanIndonesia, OTPbenar → profilnomorverifiedreadonly/emailkontakeditable → kirimprofile → pending; /orders/newtetaptertahan. Bukti auth-phone-pending.jpg.
+- PopupOAuth Google tidak dapat dioperasikan sebagai tab terpisah oleh alatbrowser yangtersedia; credentialGoogle/penautan diuji SDKemulator, popup/redirect diuji orchestrationunit. OAuthasli, CAPTCHAasli, SMSasli dan Safari/iPhonehosted belum diuji. PenggunamenyelesaikanGoogle/CAPTCHA/OTPsendiri.
+- Routing login diperbaiki menghapusrefreshganda serta mengalihkanactive/pending menujuworkspace. Pending sungguhantetapterbatas.
+- ScreenshotQA desktop/mobile/tablet: auth-login-*,auth-signup-*,auth-phone-mobile.jpg,auth-profile-*,auth-methods-*. Evaluasi visual dilaporkan terpisah.
+
+- Evaluasi visual auth PASS. Setelah evaluasi, redirect-error ditampilkan juga pada penautan dan key RouterView memakai UID agar profil tidak terbawa saat pergantian akun; tipe/build diverifikasi ulang. Server QA/emulator berakhir sebelum pemeriksaan final, sehingga routing terakhir tidak diuji kembali secara browser. SMS/OAuth produksi serta deployment rules tetap tugas konfigurasi terpisah.
+- Pratinjau utama dijalankan ulang pada port5173 dengan konfigurasi pengguna. Pemeriksaan tab utama terhalang kebijakan browser karena tab sebelumnya berada pada halaman error internal; pengujian visual menggunakan bukti QA yang telah diambil, bukan klaim login/SMS produksi.

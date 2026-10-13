@@ -12,7 +12,7 @@ if(process.platform==='win32'){
 }
 const testing=process.argv[2]==='test'
 const args=[testing?'emulators:exec':'emulators:start','--project','demo-solekasir','--only','auth,firestore']
-if(testing)args.push('vitest run tests/rules.test.ts tests/integration.test.ts tests/subscriptions-invoices.test.ts')
+if(testing)args.push('vitest run tests/rules.test.ts tests/integration.test.ts tests/subscriptions-invoices.test.ts tests/auth-integration.test.ts')
 const child=spawn(process.execPath,[require.resolve('firebase-tools/lib/bin/firebase.js'),...args],{env,stdio:'inherit'})
 child.on('error',error=>{console.error(error.message);process.exitCode=1})
 child.on('exit',code=>{process.exitCode=code??1})

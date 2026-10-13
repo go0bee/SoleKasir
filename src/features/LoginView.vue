@@ -4,25 +4,33 @@ import { useRouter } from "vue-router";
 import { Footprints, ArrowRight, ShieldCheck } from "lucide-vue-next";
 import { useSession } from "../stores/session";
 import { configured, emulator } from "../lib/firebase";
-import { errorText } from "../components/state";
+import { authErrorText } from "../lib/auth-methods";
+import AuthMethods from "../components/AuthMethods.vue";
 const session = useSession(),
   router = useRouter(),
   email = ref(""),
   password = ref(""),
   busy = ref(false),
+  socialBusy = ref(false),
   error = ref("");
+async function authenticated() {
+  await router.push(
+    session.member && session.accessState === "active"
+      ? "/"
+      : session.platformAdmin
+        ? "/admin/subscriptions"
+        : "/pending",
+  );
+}
 async function submit() {
-  if (busy.value) return;
+  if (busy.value || socialBusy.value) return;
   busy.value = true;
   error.value = "";
   try {
     await session.login(email.value.trim(), password.value);
-    await session.refresh();
-    await router.push(session.member && session.accessState === 'active' ? '/' : session.platformAdmin ? '/admin/subscriptions' : '/pending');
+    await authenticated();
   } catch (e) {
-    error.value = errorText(e).includes("auth/")
-      ? "Email atau kata sandi tidak cocok, atau layanan masuk belum tersedia."
-      : errorText(e);
+    error.value = authErrorText(e);
   } finally {
     busy.value = false;
   }
@@ -63,6 +71,12 @@ async function submit() {
         atau kasir@solekasir.test, kata sandi SoleDemo123! Transaksi tersimpan
         di emulator.
       </div>
+      <AuthMethods
+        :disabled="busy"
+        @authenticated="authenticated"
+        @busy-change="socialBusy = $event"
+      />
+      <div class="auth-divider"><span>atau masuk dengan email</span></div>
       <form @submit.prevent="submit">
         <label
           >Email<input
@@ -79,19 +93,33 @@ async function submit() {
             placeholder="Masukkan kata sandi"
             required
         /></label>
-        <p v-if="error || session.error" class="form-error" role="alert">
-          {{ error || session.error }}
+        <p
+          v-if="error || session.redirectError || session.error"
+          class="form-error"
+          role="alert"
+        >
+          {{ error || session.redirectError || session.error }}
         </p>
         <button
           class="button full"
           type="submit"
-          :disabled="busy || session.loading || !session.online || !configured"
+          :disabled="
+            busy ||
+            socialBusy ||
+            session.loading ||
+            !session.online ||
+            !configured
+          "
         >
           {{ busy ? "Memeriksa akun…" : "Masuk ke ruang kerja"
           }}<ArrowRight :size="18" />
         </button>
       </form>
-      <p class="login-help">Pemilik usaha baru? <RouterLink to="/signup" class="text-link">Daftarkan usaha</RouterLink><br />Lupa kata sandi? Hubungi pengelola SoleKasir atau pemilik toko.</p>
+      <p class="login-help">
+        Pemilik usaha baru?
+        <RouterLink to="/signup" class="text-link">Daftarkan usaha</RouterLink
+        ><br />Lupa kata sandi? Hubungi pengelola SoleKasir atau pemilik toko.
+      </p>
       <button
         v-if="session.user && !session.member"
         class="button secondary full"

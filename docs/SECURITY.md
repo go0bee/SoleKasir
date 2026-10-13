@@ -27,5 +27,6 @@ Role pengelola berasal dari platformAdmins Console, terpisah dari role owner usa
 
 InvoiceShares adalah proyeksi yang sengaja dibagikan, bukan dokumen order publik. Publik get-only enabled/unexpired, list denied; token acak32byte. Rules membandingkan proyeksi exact dengan dokumen asli, sehingga field tambahan/nominal palsu ditolak. Metadata IDs/UID pembuat tersedia pada payloadshare; bukan kredensial/profilstaff. Revokasi mencegah request berikutnya, tidak menghapus salinan penerima. Perubahan order tidak memperbarui snapshot otomatis. Linkpublik yang telah terbit tetap berlaku sampai expiry/revoke meski toko suspended; pencabutan administratif tersedia via Console. Referrer no-referrer dan noindex mencegah kebocoran biasa, bukan pengganti token rahasia.
 
-Tidak ada resetpassword publik, undangan tim, billing/subscriptiongateway atau verifikasitransferotomatis. Batasi IAM/platformadmin, evaluasi AppCheck/rateabuse/kuota untuk produksi, dan ikuti prosedur Firebase setup README.
+Tidak ada resetpassword publik, undangan tim, billing/subscriptiongateway atau verifikasitransferotomatis. Login Google dan SMS OTP ditambahkan; lihat AUTH-METHODS.md. Batasi IAM/platformadmin, evaluasi AppCheck/rateabuse/kuota untuk produksi, dan ikuti prosedur Firebase setup README.
+
 

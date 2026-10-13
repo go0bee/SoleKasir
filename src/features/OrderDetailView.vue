@@ -49,9 +49,21 @@ import {
 import { useSession } from "../stores/session";
 import { useTask, useSettings, errorText } from "../components/state";
 import AsyncState from "../components/AsyncState.vue";
-import { invoiceSnapshot, invoiceFingerprint, type SharedInvoice } from '../domain/invoices';
-import { publishInvoice, getInvoiceLink, revokeInvoice } from '../data/invoices';
-import { downloadInvoicePNG, downloadInvoicePDF, shareInvoiceFile } from '../lib/invoice-export';
+import {
+  invoiceSnapshot,
+  invoiceFingerprint,
+  type SharedInvoice,
+} from "../domain/invoices";
+import {
+  publishInvoice,
+  getInvoiceLink,
+  revokeInvoice,
+} from "../data/invoices";
+import {
+  downloadInvoicePNG,
+  downloadInvoicePDF,
+  shareInvoiceFile,
+} from "../lib/invoice-export";
 const route = useRoute(),
   session = useSession(),
   settings = useSettings(),
@@ -80,31 +92,81 @@ const route = useRoute(),
   confirmation = ref<"collect" | "cancel">(),
   reason = ref(""),
   operationId = ref(crypto.randomUUID());
-const invoiceLink = ref<SharedInvoice | null>(null), invoiceTask = useTask(), exportTask = useTask(), invoiceConfirm = ref<'publish' | 'revoke'>(), linkCopy = ref('');
-const exportSnapshot = computed(() => order.value ? invoiceSnapshot(order.value, settings.value) : undefined);
-const linkUrl = computed(() => invoiceLink.value ? new URL('/invoice/' + invoiceLink.value.token, window.location.origin).href : '');
-const linkActive = computed(() => invoiceLink.value?.enabled && invoiceLink.value.expiresAt.toMillis() > Date.now());
-const linkChanged = computed(() => invoiceLink.value && exportSnapshot.value && invoiceFingerprint(invoiceLink.value.snapshot) !== invoiceFingerprint(exportSnapshot.value));
-async function loadInvoiceLink() { await invoiceTask.run(async () => { invoiceLink.value = await getInvoiceLink(String(route.params.id)); }); }
+const invoiceLink = ref<SharedInvoice | null>(null),
+  invoiceTask = useTask(),
+  exportTask = useTask(),
+  invoiceConfirm = ref<"publish" | "revoke">(),
+  linkCopy = ref("");
+const exportSnapshot = computed(() =>
+  order.value ? invoiceSnapshot(order.value, settings.value) : undefined,
+);
+const linkUrl = computed(() =>
+  invoiceLink.value
+    ? new URL("/invoice/" + invoiceLink.value.token, window.location.origin)
+        .href
+    : "",
+);
+const linkActive = computed(
+  () =>
+    invoiceLink.value?.enabled &&
+    invoiceLink.value.expiresAt.toMillis() > Date.now(),
+);
+const linkChanged = computed(
+  () =>
+    invoiceLink.value &&
+    exportSnapshot.value &&
+    invoiceFingerprint(invoiceLink.value.snapshot) !==
+      invoiceFingerprint(exportSnapshot.value),
+);
+async function loadInvoiceLink() {
+  await invoiceTask.run(async () => {
+    invoiceLink.value = await getInvoiceLink(String(route.params.id));
+  });
+}
 async function commitInvoice() {
- const result = await invoiceTask.run(async () => {
-  if (invoiceConfirm.value === 'revoke') { await revokeInvoice(String(route.params.id)); invoiceLink.value = invoiceLink.value ? { ...invoiceLink.value, enabled: false } : null; }
-  else invoiceLink.value = await publishInvoice(String(route.params.id));
-  return true;
- }, invoiceConfirm.value === 'revoke' ? 'Tautan invoice telah dicabut.' : 'Tautan invoice diperbarui dan berlaku 30 hari.');
- if (result) { invoiceConfirm.value = undefined; linkCopy.value = ''; await load(); }
+  const result = await invoiceTask.run(
+    async () => {
+      if (invoiceConfirm.value === "revoke") {
+        await revokeInvoice(String(route.params.id));
+        invoiceLink.value = invoiceLink.value
+          ? { ...invoiceLink.value, enabled: false }
+          : null;
+      } else invoiceLink.value = await publishInvoice(String(route.params.id));
+      return true;
+    },
+    invoiceConfirm.value === "revoke"
+      ? "Tautan invoice telah dicabut."
+      : "Tautan invoice diperbarui dan berlaku 30 hari.",
+  );
+  if (result) {
+    invoiceConfirm.value = undefined;
+    linkCopy.value = "";
+    await load();
+  }
 }
-async function copyInvoiceLink() { try { await navigator.clipboard.writeText(linkUrl.value); linkCopy.value = 'Link invoice berhasil disalin.'; } catch { linkCopy.value = 'Pilih dan salin link di kolom tautan secara manual.'; } }
-async function exportInvoice(format: 'png' | 'pdf', share = false) {
- await exportTask.run(async () => {
-  const [currentOrder, currentSettings] = await Promise.all([getOrder(String(route.params.id)), getSettings()]);
-  const snapshot = invoiceSnapshot(currentOrder, currentSettings);
-  if (share) await shareInvoiceFile(snapshot, format);
-  else if (format === 'png') await downloadInvoicePNG(snapshot);
-  else await downloadInvoicePDF(snapshot);
- });
+async function copyInvoiceLink() {
+  try {
+    await navigator.clipboard.writeText(linkUrl.value);
+    linkCopy.value = "Link invoice berhasil disalin.";
+  } catch {
+    linkCopy.value = "Pilih dan salin link di kolom tautan secara manual.";
+  }
 }
-watch(showReceipt, value => { if (value) void loadInvoiceLink(); });
+async function exportInvoice(format: "png" | "pdf", share = false) {
+  await exportTask.run(async () => {
+    const [currentOrder, currentSettings] = await Promise.all([
+      getOrder(String(route.params.id)),
+      getSettings(),
+    ]);
+    const snapshot = invoiceSnapshot(currentOrder, currentSettings);
+    if (share) await shareInvoiceFile(snapshot, format);
+    else if (format === "png") await downloadInvoicePNG(snapshot);
+    else await downloadInvoicePDF(snapshot);
+  });
+}
+watch(showReceipt, (value) => {
+  if (value) void loadInvoiceLink();
+});
 async function fetchDetails() {
   const result = await Promise.all([
     getOrder(String(route.params.id)),
@@ -484,16 +546,171 @@ watch(
           {{ copyStatus }}
         </p>
         <div class="invoice-sharing no-print">
-          <div class="invoice-section-heading"><div><span class="eyebrow">INVOICE UNTUK CHAT</span><h2>Simpan file atau bagikan link</h2><p>PNG dan PDF hanya memuat identitas toko, nama pelanggan, layanan, dan tagihan.</p></div><Share2 :size="24" /></div>
-          <div class="inline-actions"><button class="button secondary" :disabled="exportTask.busy.value" @click="exportInvoice('png')"><Download :size="17" />Unduh PNG</button><button class="button secondary" :disabled="exportTask.busy.value" @click="exportInvoice('pdf')"><Download :size="17" />Unduh PDF</button><button class="button secondary" :disabled="exportTask.busy.value" @click="exportInvoice('png', true)"><Share2 :size="17" />Bagikan PNG</button></div>
-          <p v-if="exportTask.busy.value" class="field-help" role="status">Menyiapkan file invoice…</p><p v-if="exportTask.error.value" class="form-error" role="alert">{{ exportTask.error.value }}</p>
-          <div class="invoice-link-box"><h3><Link :size="18" />Tautan invoice pelanggan</h3><p class="field-help">Tautan berisi salinan tagihan saat terakhir diperbarui. Perbarui link setelah pembayaran atau perubahan order. URL tetap sama dan berlaku 30 hari sejak diperbarui.</p>
-            <p v-if="invoiceTask.busy.value" class="field-help" role="status">Memproses tautan invoice…</p>
-            <p v-if="invoiceTask.error.value" class="form-error" role="alert">{{ invoiceTask.error.value }}</p><p v-if="invoiceTask.success.value" class="success-message" role="status">{{ invoiceTask.success.value }}</p>
-            <template v-if="invoiceLink"><p class="invoice-link-status"><span class="badge" :class="{green: linkActive, neutral: !linkActive}">{{ !invoiceLink.enabled ? 'Dicabut' : linkActive ? 'Tautan aktif' : 'Kedaluwarsa' }}</span><span>Berlaku hingga {{ dateTime(invoiceLink.expiresAt) }}</span></p><label v-if="linkActive">Link invoice<input :value="linkUrl" readonly @focus="($event.target as HTMLInputElement).select()" /></label><p v-if="linkActive && linkChanged" class="notice compact">Tagihan atau detail order telah berubah. Perbarui tautan sebelum membagikannya agar pelanggan melihat invoice terbaru.</p><p v-if="linkActive" class="field-help">Terakhir diperbarui {{ dateTime(invoiceLink.updatedAt) }}.</p></template>
-            <div v-if="!invoiceConfirm" class="inline-actions"><button class="button" :disabled="invoiceTask.busy.value || !session.online" @click="invoiceConfirm = 'publish'">{{ invoiceLink ? 'Perbarui link invoice' : 'Buat link invoice' }}</button><template v-if="linkActive"><button class="button secondary" :disabled="invoiceTask.busy.value" @click="copyInvoiceLink"><Copy :size="17" />Salin link</button><a :href="'https://wa.me/' + order.customerPhone + '?text=' + encodeURIComponent('Invoice ' + order.number + ': ' + linkUrl)" class="button secondary" target="_blank" rel="noopener"><MessageCircle :size="17" />Bagikan link ke WhatsApp</a><button class="button quiet danger-text" :disabled="invoiceTask.busy.value || !session.online" @click="invoiceConfirm = 'revoke'">Cabut link</button></template></div>
-            <div v-else class="confirmation"><strong>{{ invoiceConfirm === 'publish' ? 'Siapa pun yang memiliki link bisa melihat nama dan tagihan invoice ini.' : 'Cabut tautan invoice ini?' }}</strong><p>{{ invoiceConfirm === 'publish' ? 'Link tidak memuat nomor pelanggan, catatan pengerjaan, atau data petugas. Tautan aktif selama 30 hari dan dapat dicabut kapan saja.' : 'Pelanggan tidak dapat membuka link ini sampai Anda memperbaruinya kembali.' }}</p><div class="form-actions"><button class="button secondary" :disabled="invoiceTask.busy.value" @click="invoiceConfirm = undefined">Batal</button><button class="button" :class="{danger: invoiceConfirm === 'revoke'}" :disabled="invoiceTask.busy.value || !session.online" @click="commitInvoice">{{ invoiceTask.busy.value ? 'Menyimpan…' : invoiceConfirm === 'publish' ? 'Ya, terbitkan link' : 'Ya, cabut link' }}</button></div></div>
-            <p v-if="linkCopy" class="field-help" role="status">{{ linkCopy }}</p>
+          <div class="invoice-section-heading">
+            <div>
+              <span class="eyebrow">INVOICE UNTUK CHAT</span>
+              <h2>Simpan file atau bagikan link</h2>
+              <p>
+                PNG dan PDF hanya memuat identitas toko, nama pelanggan,
+                layanan, dan tagihan.
+              </p>
+            </div>
+            <Share2 :size="24" />
+          </div>
+          <div class="inline-actions">
+            <button
+              class="button secondary"
+              :disabled="exportTask.busy.value"
+              @click="exportInvoice('png')"
+            >
+              <Download :size="17" />Unduh PNG</button
+            ><button
+              class="button secondary"
+              :disabled="exportTask.busy.value"
+              @click="exportInvoice('pdf')"
+            >
+              <Download :size="17" />Unduh PDF</button
+            ><button
+              class="button secondary"
+              :disabled="exportTask.busy.value"
+              @click="exportInvoice('png', true)"
+            >
+              <Share2 :size="17" />Bagikan PNG
+            </button>
+          </div>
+          <p v-if="exportTask.busy.value" class="field-help" role="status">
+            Menyiapkan file invoice…
+          </p>
+          <p v-if="exportTask.error.value" class="form-error" role="alert">
+            {{ exportTask.error.value }}
+          </p>
+          <div class="invoice-link-box">
+            <h3><Link :size="18" />Tautan invoice pelanggan</h3>
+            <p class="field-help">
+              Tautan berisi salinan tagihan saat terakhir diperbarui. Perbarui
+              link setelah pembayaran atau perubahan order. URL tetap sama dan
+              berlaku 30 hari sejak diperbarui.
+            </p>
+            <p v-if="invoiceTask.busy.value" class="field-help" role="status">
+              Memproses tautan invoice…
+            </p>
+            <p v-if="invoiceTask.error.value" class="form-error" role="alert">
+              {{ invoiceTask.error.value }}
+            </p>
+            <p
+              v-if="invoiceTask.success.value"
+              class="success-message"
+              role="status"
+            >
+              {{ invoiceTask.success.value }}
+            </p>
+            <template v-if="invoiceLink"
+              ><p class="invoice-link-status">
+                <span
+                  class="badge"
+                  :class="{ green: linkActive, neutral: !linkActive }"
+                  >{{
+                    !invoiceLink.enabled
+                      ? "Dicabut"
+                      : linkActive
+                        ? "Tautan aktif"
+                        : "Kedaluwarsa"
+                  }}</span
+                ><span
+                  >Berlaku hingga {{ dateTime(invoiceLink.expiresAt) }}</span
+                >
+              </p>
+              <label v-if="linkActive"
+                >Link invoice<input
+                  :value="linkUrl"
+                  readonly
+                  @focus="($event.target as HTMLInputElement).select()"
+              /></label>
+              <p v-if="linkActive && linkChanged" class="notice compact">
+                Tagihan atau detail order telah berubah. Perbarui tautan sebelum
+                membagikannya agar pelanggan melihat invoice terbaru.
+              </p>
+              <p v-if="linkActive" class="field-help">
+                Terakhir diperbarui {{ dateTime(invoiceLink.updatedAt) }}.
+              </p></template
+            >
+            <div v-if="!invoiceConfirm" class="inline-actions">
+              <button
+                class="button"
+                :disabled="invoiceTask.busy.value || !session.online"
+                @click="invoiceConfirm = 'publish'"
+              >
+                {{
+                  invoiceLink ? "Perbarui link invoice" : "Buat link invoice"
+                }}</button
+              ><template v-if="linkActive"
+                ><button
+                  class="button secondary"
+                  :disabled="invoiceTask.busy.value"
+                  @click="copyInvoiceLink"
+                >
+                  <Copy :size="17" />Salin link</button
+                ><a
+                  :href="
+                    'https://wa.me/' +
+                    order.customerPhone +
+                    '?text=' +
+                    encodeURIComponent(
+                      'Invoice ' + order.number + ': ' + linkUrl,
+                    )
+                  "
+                  class="button secondary"
+                  target="_blank"
+                  rel="noopener"
+                  ><MessageCircle :size="17" />Bagikan link ke WhatsApp</a
+                ><button
+                  class="button quiet danger-text"
+                  :disabled="invoiceTask.busy.value || !session.online"
+                  @click="invoiceConfirm = 'revoke'"
+                >
+                  Cabut link
+                </button></template
+              >
+            </div>
+            <div v-else class="confirmation">
+              <strong>{{
+                invoiceConfirm === "publish"
+                  ? "Siapa pun yang memiliki link bisa melihat nama dan tagihan invoice ini."
+                  : "Cabut tautan invoice ini?"
+              }}</strong>
+              <p>
+                {{
+                  invoiceConfirm === "publish"
+                    ? "Link tidak memuat nomor pelanggan, catatan pengerjaan, atau data petugas. Tautan aktif selama 30 hari dan dapat dicabut kapan saja."
+                    : "Pelanggan tidak dapat membuka link ini sampai Anda memperbaruinya kembali."
+                }}
+              </p>
+              <div class="form-actions">
+                <button
+                  class="button secondary"
+                  :disabled="invoiceTask.busy.value"
+                  @click="invoiceConfirm = undefined"
+                >
+                  Batal</button
+                ><button
+                  class="button"
+                  :class="{ danger: invoiceConfirm === 'revoke' }"
+                  :disabled="invoiceTask.busy.value || !session.online"
+                  @click="commitInvoice"
+                >
+                  {{
+                    invoiceTask.busy.value
+                      ? "Menyimpan…"
+                      : invoiceConfirm === "publish"
+                        ? "Ya, terbitkan link"
+                        : "Ya, cabut link"
+                  }}
+                </button>
+              </div>
+            </div>
+            <p v-if="linkCopy" class="field-help" role="status">
+              {{ linkCopy }}
+            </p>
           </div>
         </div>
       </section>

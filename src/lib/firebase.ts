@@ -16,7 +16,9 @@ export const configured =
   );
 export const defaultStoreId = env.VITE_STORE_ID || "main";
 export let storeId = defaultStoreId;
-export function setStoreId(value: string) { storeId = value; }
+export function setStoreId(value: string) {
+  storeId = value;
+}
 const app = initializeApp({
   apiKey: env.VITE_FIREBASE_API_KEY || "demo-key",
   authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || "demo-solekasir.firebaseapp.com",
@@ -24,6 +26,7 @@ const app = initializeApp({
   appId: env.VITE_FIREBASE_APP_ID || "demo-app",
 });
 export const auth = getAuth(app);
+auth.languageCode = "id";
 export const db = initializeFirestore(app, { localCache: memoryLocalCache() });
 if (emulator) {
   const host = env.VITE_EMULATOR_HOST || "127.0.0.1";

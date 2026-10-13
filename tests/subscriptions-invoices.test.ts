@@ -100,3 +100,27 @@ it('invoice tidak dapat diinjeksi PII, tagihan palsu, expiry panjang atau diubah
  await expect(readSharedInvoice(anonymous(),share.token)).rejects.toThrow('kedaluwarsa')
 })
 
+
+it('akun Google tetap pending; email auth palsu dan phone identity tanpa bukti ditolak',async()=>{
+ const google=env.authenticatedContext('google-new',{email:'google@test.example',email_verified:true,firebase:{sign_in_provider:'google.com'}}).firestore() as unknown as Firestore
+ const op=createSubscriptionOperations({db:google,uid:'google-new',email:'google@test.example'})
+ await op.submit({...profile(),email:'google@test.example'});expect((await getDoc(doc(google,'applications/google-new'))).data()?.status).toBe('pending')
+ await assertFails(getDoc(doc(google,'stores/main/settings/general')))
+ await expect(op.submit({...profile(),email:'owner@test.example'})).rejects.toThrow('Email harus')
+ const without=env.authenticatedContext('no-identity').firestore() as unknown as Firestore
+ await assertFails(setDoc(doc(without,'applications/no-identity'),{...profile(),phone:'6281234567890',status:'pending',storeId:'',reason:'',createdAt:serverTimestamp(),reviewedAt:null,reviewedBy:''}))
+})
+it('phone-only menyimpan email kontak dan hanya nomor verified; contactemail admin tidak memberi akses',async()=>{
+ const phone='+6281234567890',uid='phone-new',db=env.authenticatedContext(uid,{phone_number:phone,firebase:{sign_in_provider:'phone'}}).firestore() as unknown as Firestore
+ const op=createSubscriptionOperations({db,uid,email:null,phoneNumber:phone})
+ await op.submit({...profile(),email:'owner@test.example'});const app=(await getDoc(doc(db,'applications/'+uid))).data()!
+ expect(app.email).toBe('owner@test.example');expect(app.status).toBe('pending')
+ await assertFails(getDoc(doc(db,'platformAdmins/owner')));await assertFails(getDocs(collection(db,'applications')))
+ await assertFails(updateDoc(doc(db,'applications/'+uid),{status:'approved'}))
+ await expect(op.submit({...profile(),phone:'081234567891'})).rejects.toThrow('Nomor harus')
+ const fake={...profile(),phone:'6281234567891',status:'pending',storeId:'',reason:'',createdAt:serverTimestamp(),reviewedAt:null,reviewedBy:''}
+ const other=env.authenticatedContext('phone-fake',{phone_number:phone}).firestore() as unknown as Firestore
+ await assertFails(setDoc(doc(other,'applications/phone-fake'),fake))
+ await admin().approve(uid,expiry());await assertSucceeds(getDoc(doc(db,'stores/business-'+uid+'/settings/general')))
+})
+

@@ -1,36 +1,330 @@
-import { collection, doc, getDocFromServer, getDocsFromServer, getAggregateFromServer, query, where, orderBy, limit, startAfter, count, sum, setDoc, serverTimestamp, runTransaction, Timestamp } from 'firebase/firestore'
-import type { QueryConstraint, QueryDocumentSnapshot } from 'firebase/firestore'
-import { db,storeId } from '../lib/firebase'
-import { useSession } from '../stores/session'
-import type { Customer, Dashboard, Expense, Order, OrderEvent, OrderFilters, Payment, Report, Service, Settings } from '../domain/types'
-import { dateKey, dayRange, money, normalizePhone, paymentDelta } from '../domain/business'
-import { createOperations } from './transactions'
-export interface Page<T>{rows:T[];cursor:unknown;hasMore:boolean}
-const path=(s:string)=>`stores/${storeId}/${s}`
-const col=(s:string)=>collection(db,path(s))
-const ref=(s:string)=>doc(db,path(s))
-function guard(owner=false){const s=useSession();if(!s.online)throw new Error('Anda offline. Sambungkan internet terlebih dahulu.');if(!s.user||!s.member||!s.accessValid)throw new Error('Akses toko belum aktif atau masa langganan telah berakhir.');if(owner&&!s.owner)throw new Error('Fitur ini hanya tersedia untuk owner.');return s}
-const operations=()=>{const s=guard();return createOperations({db,storeId,uid:s.user!.uid,role:s.member!.role})}
-export const createOrder:ReturnType<typeof createOperations>['createOrder']=(...a)=>operations().createOrder(...a)
-export const addPayment:ReturnType<typeof createOperations>['addPayment']=(...a)=>operations().addPayment(...a)
-export const updateItem:ReturnType<typeof createOperations>['updateItem']=(...a)=>operations().updateItem(...a)
-export const collectOrder:ReturnType<typeof createOperations>['collectOrder']=(...a)=>operations().collectOrder(...a)
-export const cancelOrder:ReturnType<typeof createOperations>['cancelOrder']=(...a)=>operations().cancelOrder(...a)
-export const saveCustomer:ReturnType<typeof createOperations>['saveCustomer']=(...a)=>operations().saveCustomer(...a)
-async function get<T>(s:string){guard();const d=await getDocFromServer(ref(s));if(!d.exists())throw new Error('Data tidak ditemukan.');return {id:d.id,...d.data()} as T}
-async function page<T>(s:string,constraints:QueryConstraint[],cursor?:unknown):Promise<Page<T>>{guard();const q=query(col(s),...constraints,...(cursor?[startAfter(cursor as QueryDocumentSnapshot)]:[]),limit(25));const d=await getDocsFromServer(q);return {rows:d.docs.map(x=>({id:x.id,...x.data()}) as T),cursor:d.docs.at(-1),hasMore:d.size===25}}
-async function all<T>(s:string,constraints:QueryConstraint[]){const rows:T[]=[];let cursor:unknown;for(let n=0;n<400;n++){const p=await page<T>(s,constraints,cursor);rows.push(...p.rows);if(!p.hasMore)return rows;cursor=p.cursor}throw new Error('Periode terlalu besar. Persempit rentang tanggal agar laporan lengkap.')} 
-export const getCustomer=(id:string)=>get<Customer>(`customers/${id}`)
-export const getOrder=(id:string)=>get<Order>(`orders/${id}`)
-export async function getSettings(){const {id,...settings}=await get<Settings & {id:string}>('settings/general');void id;return settings}
-export async function saveSettings(s:Settings){guard(true);if(!s.name.trim()||!s.prefix.match(/^[A-Z0-9]{2,6}$/))throw new Error('Isi nama toko dan prefix 2–6 huruf kapital/angka.');if(s.phone)normalizePhone(s.phone);await setDoc(ref('settings/general'),s)}
-export async function listServices(){guard();const d=await getDocsFromServer(query(col('services'),orderBy('name'),limit(100)));return d.docs.map(x=>({id:x.id,...x.data()}) as Service)}
-export async function saveService(s:Omit<Service,'id'>,id:string=crypto.randomUUID()){guard(true);money(s.price,'Harga');if(!s.name.trim()||!Number.isInteger(s.days)||s.days<1||s.days>90)throw new Error('Isi nama layanan dan estimasi 1–90 hari.');await setDoc(ref(`services/${id}`),s);return id}
-export async function listCustomers(search='',cursor?:unknown){const term=search.trim().toLowerCase();let field='nameLower',value=term;if(/^[+\d]/.test(term)){field='phone';value=term.replace(/[\s()+.-]/g,'');if(value.startsWith('0'))value='62'+value.slice(1);if(value.startsWith('8'))value='62'+value}return page<Customer>('customers',value?[where(field,'>=',value),where(field,'<=',value+'\uf8ff'),orderBy(field)]:[orderBy('nameLower')],cursor)}
-export async function listOrders(f:OrderFilters={},cursor?:unknown){const c:QueryConstraint[]=[];if(f.customerId)c.push(where('customerId','==',f.customerId));if(f.status==='active')c.push(where('active','==',true));if(f.status==='ready')c.push(where('active','==',true),where('allReady','==',true));if(f.status==='collected')c.push(where('collected','==',true));if(f.status==='cancelled')c.push(where('cancelled','==',true));if(f.unpaid)c.push(where('balance','>',0));if(f.overdue)c.push(where('active','==',true),where('dueAt','<',Timestamp.now()));if(f.from||f.to){const r=dayRange(f.from||'2000-01-01',f.to||dateKey());c.push(where('createdAt','>=',r.start),where('createdAt','<',r.end))}c.push(orderBy('createdAt','desc'));return page<Order>('orders',c,cursor)}
-export const listPayments=(id:string)=>all<Payment>(`orders/${id}/payments`,[orderBy('createdAt','desc')])
-export const listEvents=(id:string)=>all<OrderEvent>(`orders/${id}/events`,[orderBy('createdAt','desc')])
-async function agg(s:string,c:QueryConstraint[],fields:Record<string,ReturnType<typeof count>|ReturnType<typeof sum>>){guard();return (await getAggregateFromServer(query(col(s),...c),fields)).data()}
-export async function getDashboard():Promise<Dashboard>{const r=dayRange(dateKey()),active=[where('active','==',true)];const [today,work,ready,late,payments,balance,recent]=await Promise.all([agg('orders',[where('createdAt','>=',r.start),where('createdAt','<',r.end)],{n:count()}),agg('orders',active,{pairs:sum('itemCount'),ready:sum('readyCount')}),agg('orders',[...active,where('allReady','==',true)],{n:count()}),agg('orders',[...active,where('dueAt','<',Timestamp.now())],{n:count()}),agg('payments',[where('createdAt','>=',r.start),where('createdAt','<',r.end),where('kind','==','payment')],{amount:sum('amount')}),agg('orders',active,{amount:sum('balance')}),getDocsFromServer(query(col('orders'),orderBy('createdAt','desc'),limit(8)))]);return {todayOrders:today.n,workingPairs:work.pairs-work.ready,readyOrders:ready.n,overdueOrders:late.n,todayPayments:payments.amount,activeBalance:balance.amount,recent:recent.docs.map(d=>({id:d.id,...d.data()}) as Order)}}
-export async function getReport(from:string,to:string):Promise<Report>{guard(true);const r=dayRange(from,to),c=[where('createdAt','>=',r.start),where('createdAt','<',r.end),orderBy('createdAt')];const [orders,payments,expenses]=await Promise.all([all<Order>('orders',c),all<Payment>('payments',c),all<Expense>('expenses',c)]);const valid=orders.filter(o=>!o.cancelled),receipts=payments.filter(p=>p.kind==='payment').reduce((s,p)=>s+p.amount,0),refunds=payments.filter(p=>p.kind==='refund').reduce((s,p)=>s+p.amount,0),corrections=payments.filter(p=>p.kind==='void').reduce((s,p)=>s+p.amount,0),net=payments.reduce((s,p)=>s+paymentDelta(p),0),expenseTotal=expenses.reduce((s,e)=>s+e.amount,0),popular=new Map<string,number>();valid.flatMap(o=>o.items).forEach(i=>popular.set(i.serviceName,(popular.get(i.serviceName)||0)+1));return {orders,payments,expenses,count:orders.length,pairs:orders.reduce((s,o)=>s+o.itemCount,0),value:valid.reduce((s,o)=>s+o.total,0),cancelledValue:orders.filter(o=>o.cancelled).reduce((s,o)=>s+o.total,0),receipts,refunds,corrections,net,balance:valid.filter(o=>o.active).reduce((s,o)=>s+o.balance,0),expenseTotal,cashSurplus:net-expenseTotal,popular:Array.from(popular,([name,count])=>({name,count})).sort((a,b)=>b.count-a.count)}}
-export async function addExpense(description:string,amount:number,id:string){const s=guard(true);money(amount);if(amount<=0||!description.trim())throw new Error('Isi deskripsi dan nominal pengeluaran.');await runTransaction(db,async tx=>{const d=await tx.get(ref(`expenses/${id}`));if(d.exists())return;tx.set(ref(`expenses/${id}`),{description,amount,createdAt:serverTimestamp(),createdBy:s.user!.uid})})}
+import {
+  collection,
+  doc,
+  getDocFromServer,
+  getDocsFromServer,
+  getAggregateFromServer,
+  query,
+  where,
+  orderBy,
+  limit,
+  startAfter,
+  count,
+  sum,
+  setDoc,
+  serverTimestamp,
+  runTransaction,
+  Timestamp,
+} from "firebase/firestore";
+import type {
+  QueryConstraint,
+  QueryDocumentSnapshot,
+} from "firebase/firestore";
+import { db, storeId } from "../lib/firebase";
+import { useSession } from "../stores/session";
+import type {
+  Customer,
+  Dashboard,
+  Expense,
+  Order,
+  OrderEvent,
+  OrderFilters,
+  Payment,
+  Report,
+  Service,
+  Settings,
+} from "../domain/types";
+import {
+  dateKey,
+  dayRange,
+  money,
+  normalizePhone,
+  paymentDelta,
+} from "../domain/business";
+import { createOperations } from "./transactions";
+export interface Page<T> {
+  rows: T[];
+  cursor: unknown;
+  hasMore: boolean;
+}
+const path = (s: string) => `stores/${storeId}/${s}`;
+const col = (s: string) => collection(db, path(s));
+const ref = (s: string) => doc(db, path(s));
+function guard(owner = false) {
+  const s = useSession();
+  if (!s.online)
+    throw new Error("Anda offline. Sambungkan internet terlebih dahulu.");
+  if (!s.user || !s.member || !s.accessValid)
+    throw new Error(
+      "Akses toko belum aktif atau masa langganan telah berakhir.",
+    );
+  if (owner && !s.owner)
+    throw new Error("Fitur ini hanya tersedia untuk owner.");
+  return s;
+}
+const operations = () => {
+  const s = guard();
+  return createOperations({
+    db,
+    storeId,
+    uid: s.user!.uid,
+    role: s.member!.role,
+  });
+};
+export const createOrder: ReturnType<typeof createOperations>["createOrder"] = (
+  ...a
+) => operations().createOrder(...a);
+export const addPayment: ReturnType<typeof createOperations>["addPayment"] = (
+  ...a
+) => operations().addPayment(...a);
+export const updateItem: ReturnType<typeof createOperations>["updateItem"] = (
+  ...a
+) => operations().updateItem(...a);
+export const collectOrder: ReturnType<
+  typeof createOperations
+>["collectOrder"] = (...a) => operations().collectOrder(...a);
+export const cancelOrder: ReturnType<typeof createOperations>["cancelOrder"] = (
+  ...a
+) => operations().cancelOrder(...a);
+export const saveCustomer: ReturnType<
+  typeof createOperations
+>["saveCustomer"] = (...a) => operations().saveCustomer(...a);
+async function get<T>(s: string) {
+  guard();
+  const d = await getDocFromServer(ref(s));
+  if (!d.exists()) throw new Error("Data tidak ditemukan.");
+  return { id: d.id, ...d.data() } as T;
+}
+async function page<T>(
+  s: string,
+  constraints: QueryConstraint[],
+  cursor?: unknown,
+): Promise<Page<T>> {
+  guard();
+  const q = query(
+    col(s),
+    ...constraints,
+    ...(cursor ? [startAfter(cursor as QueryDocumentSnapshot)] : []),
+    limit(25),
+  );
+  const d = await getDocsFromServer(q);
+  return {
+    rows: d.docs.map((x) => ({ id: x.id, ...x.data() }) as T),
+    cursor: d.docs.at(-1),
+    hasMore: d.size === 25,
+  };
+}
+async function all<T>(s: string, constraints: QueryConstraint[]) {
+  const rows: T[] = [];
+  let cursor: unknown;
+  for (let n = 0; n < 400; n++) {
+    const p = await page<T>(s, constraints, cursor);
+    rows.push(...p.rows);
+    if (!p.hasMore) return rows;
+    cursor = p.cursor;
+  }
+  throw new Error(
+    "Periode terlalu besar. Persempit rentang tanggal agar laporan lengkap.",
+  );
+}
+export const getCustomer = (id: string) => get<Customer>(`customers/${id}`);
+export const getOrder = (id: string) => get<Order>(`orders/${id}`);
+export async function getSettings() {
+  const { id, ...settings } = await get<Settings & { id: string }>(
+    "settings/general",
+  );
+  void id;
+  return settings;
+}
+export async function saveSettings(s: Settings) {
+  guard(true);
+  if (!s.name.trim() || !s.prefix.match(/^[A-Z0-9]{2,6}$/))
+    throw new Error("Isi nama toko dan prefix 2–6 huruf kapital/angka.");
+  if (s.phone) normalizePhone(s.phone);
+  await setDoc(ref("settings/general"), s);
+}
+export async function listServices() {
+  guard();
+  const d = await getDocsFromServer(
+    query(col("services"), orderBy("name"), limit(100)),
+  );
+  return d.docs.map((x) => ({ id: x.id, ...x.data() }) as Service);
+}
+export async function saveService(
+  s: Omit<Service, "id">,
+  id: string = crypto.randomUUID(),
+) {
+  guard(true);
+  money(s.price, "Harga");
+  if (!s.name.trim() || !Number.isInteger(s.days) || s.days < 1 || s.days > 90)
+    throw new Error("Isi nama layanan dan estimasi 1–90 hari.");
+  await setDoc(ref(`services/${id}`), s);
+  return id;
+}
+export async function listCustomers(search = "", cursor?: unknown) {
+  const term = search.trim().toLowerCase();
+  let field = "nameLower",
+    value = term;
+  if (/^[+\d]/.test(term)) {
+    field = "phone";
+    value = term.replace(/[\s()+.-]/g, "");
+    if (value.startsWith("0")) value = "62" + value.slice(1);
+    if (value.startsWith("8")) value = "62" + value;
+  }
+  return page<Customer>(
+    "customers",
+    value
+      ? [
+          where(field, ">=", value),
+          where(field, "<=", value + "\uf8ff"),
+          orderBy(field),
+        ]
+      : [orderBy("nameLower")],
+    cursor,
+  );
+}
+export async function listOrders(f: OrderFilters = {}, cursor?: unknown) {
+  const c: QueryConstraint[] = [];
+  if (f.customerId) c.push(where("customerId", "==", f.customerId));
+  if (f.status === "active") c.push(where("active", "==", true));
+  if (f.status === "ready")
+    c.push(where("active", "==", true), where("allReady", "==", true));
+  if (f.status === "collected") c.push(where("collected", "==", true));
+  if (f.status === "cancelled") c.push(where("cancelled", "==", true));
+  if (f.unpaid) c.push(where("balance", ">", 0));
+  if (f.overdue)
+    c.push(where("active", "==", true), where("dueAt", "<", Timestamp.now()));
+  if (f.from || f.to) {
+    const r = dayRange(f.from || "2000-01-01", f.to || dateKey());
+    c.push(where("createdAt", ">=", r.start), where("createdAt", "<", r.end));
+  }
+  c.push(orderBy("createdAt", "desc"));
+  return page<Order>("orders", c, cursor);
+}
+export const listPayments = (id: string) =>
+  all<Payment>(`orders/${id}/payments`, [orderBy("createdAt", "desc")]);
+export const listEvents = (id: string) =>
+  all<OrderEvent>(`orders/${id}/events`, [orderBy("createdAt", "desc")]);
+async function agg(
+  s: string,
+  c: QueryConstraint[],
+  fields: Record<string, ReturnType<typeof count> | ReturnType<typeof sum>>,
+) {
+  guard();
+  return (await getAggregateFromServer(query(col(s), ...c), fields)).data();
+}
+export async function getDashboard(): Promise<Dashboard> {
+  const r = dayRange(dateKey()),
+    active = [where("active", "==", true)];
+  const [today, work, ready, late, payments, balance, recent] =
+    await Promise.all([
+      agg(
+        "orders",
+        [where("createdAt", ">=", r.start), where("createdAt", "<", r.end)],
+        { n: count() },
+      ),
+      agg("orders", active, {
+        pairs: sum("itemCount"),
+        ready: sum("readyCount"),
+      }),
+      agg("orders", [...active, where("allReady", "==", true)], { n: count() }),
+      agg("orders", [...active, where("dueAt", "<", Timestamp.now())], {
+        n: count(),
+      }),
+      agg(
+        "payments",
+        [
+          where("createdAt", ">=", r.start),
+          where("createdAt", "<", r.end),
+          where("kind", "==", "payment"),
+        ],
+        { amount: sum("amount") },
+      ),
+      agg("orders", active, { amount: sum("balance") }),
+      getDocsFromServer(
+        query(col("orders"), orderBy("createdAt", "desc"), limit(8)),
+      ),
+    ]);
+  return {
+    todayOrders: today.n,
+    workingPairs: work.pairs - work.ready,
+    readyOrders: ready.n,
+    overdueOrders: late.n,
+    todayPayments: payments.amount,
+    activeBalance: balance.amount,
+    recent: recent.docs.map((d) => ({ id: d.id, ...d.data() }) as Order),
+  };
+}
+export async function getReport(from: string, to: string): Promise<Report> {
+  guard(true);
+  const r = dayRange(from, to),
+    c = [
+      where("createdAt", ">=", r.start),
+      where("createdAt", "<", r.end),
+      orderBy("createdAt"),
+    ];
+  const [orders, payments, expenses] = await Promise.all([
+    all<Order>("orders", c),
+    all<Payment>("payments", c),
+    all<Expense>("expenses", c),
+  ]);
+  const valid = orders.filter((o) => !o.cancelled),
+    receipts = payments
+      .filter((p) => p.kind === "payment")
+      .reduce((s, p) => s + p.amount, 0),
+    refunds = payments
+      .filter((p) => p.kind === "refund")
+      .reduce((s, p) => s + p.amount, 0),
+    corrections = payments
+      .filter((p) => p.kind === "void")
+      .reduce((s, p) => s + p.amount, 0),
+    net = payments.reduce((s, p) => s + paymentDelta(p), 0),
+    expenseTotal = expenses.reduce((s, e) => s + e.amount, 0),
+    popular = new Map<string, number>();
+  valid
+    .flatMap((o) => o.items)
+    .forEach((i) =>
+      popular.set(i.serviceName, (popular.get(i.serviceName) || 0) + 1),
+    );
+  return {
+    orders,
+    payments,
+    expenses,
+    count: orders.length,
+    pairs: orders.reduce((s, o) => s + o.itemCount, 0),
+    value: valid.reduce((s, o) => s + o.total, 0),
+    cancelledValue: orders
+      .filter((o) => o.cancelled)
+      .reduce((s, o) => s + o.total, 0),
+    receipts,
+    refunds,
+    corrections,
+    net,
+    balance: valid.filter((o) => o.active).reduce((s, o) => s + o.balance, 0),
+    expenseTotal,
+    cashSurplus: net - expenseTotal,
+    popular: Array.from(popular, ([name, count]) => ({ name, count })).sort(
+      (a, b) => b.count - a.count,
+    ),
+  };
+}
+export async function addExpense(
+  description: string,
+  amount: number,
+  id: string,
+) {
+  const s = guard(true);
+  money(amount);
+  if (amount <= 0 || !description.trim())
+    throw new Error("Isi deskripsi dan nominal pengeluaran.");
+  await runTransaction(db, async (tx) => {
+    const d = await tx.get(ref(`expenses/${id}`));
+    if (d.exists()) return;
+    tx.set(ref(`expenses/${id}`), {
+      description,
+      amount,
+      createdAt: serverTimestamp(),
+      createdBy: s.user!.uid,
+    });
+  });
+}

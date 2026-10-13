@@ -1,6 +1,6 @@
 # SoleKasir
 
-Kasir cuci sepatu dengan satu outlet per usaha dan pendaftaran langganan manual, bahasa Indonesia, rupiah integer, zona waktu Asia/Jakarta. Vue 3 Composition API + TypeScript + Vite, Tailwind, Router, Pinia, Firebase email/password, Firestore Standard, Firebase Hosting, PWA. Data persisten utama **hanya Firestore**. Tidak memakai server/VPS, Functions, Storage, App Hosting, SMS atau gateway. Pengiriman WhatsApp manual melalui wa.me; transfer/QRIS diverifikasi petugas.
+Kasir cuci sepatu dengan satu outlet per usaha dan pendaftaran langganan manual, bahasa Indonesia, rupiah integer, zona waktu Asia/Jakarta. Vue 3 Composition API + TypeScript + Vite, Tailwind, Router, Pinia, Firebase email/password, Firestore Standard, Firebase Hosting, PWA. Data persisten utama **hanya Firestore**. Tidak memakai server/VPS, Functions, Storage, App Hosting atau gateway. Login email/password, Google, dan nomor melalui Firebase Auth tersedia; SMS OTP asli membutuhkan Blaze. Pengiriman WhatsApp manual melalui wa.me; transfer/QRIS diverifikasi petugas.
 
 ## Mulai lokal
 
@@ -56,6 +56,10 @@ Pengujian domain: hitungan rupiah, diskon, DP/pelunasan, kembalian, syarat penga
 5. Buat `stores/main/settings/general` melalui Console dengan tepat delapan field string: `name`, `address`, `phone` (format `628…` atau kosong), `hours`, `terms`, `receivedTemplate`, `readyTemplate`, `prefix` (2–6 huruf kapital/angka, misalnya SK). Contoh template: `Halo {nama}, order {order} diterima. Estimasi {estimasi}. Total {total}, sisa {sisa}. — {toko}`. Jangan mempatbahkan field lain. Setelah ini owner dapat mengedit di aplikasi dan membuat layanan dengan harga toko sebenarnya.
 6. Untuk kasir, Add user di Authentication; buat `accounts/{UID}` dengan `storeId` toko tujuan melalui Console serta membership UID pada toko yang sama dengan `role: kasir`, `name`, `active: true`. Untuk mencabut akses set active false di Console; rules berlaku pada request berikutnya. Hapus membership juga menolak akses. Aplikasi memverifikasi membership saat login; bila role berubah saat sesi hidup, login ulang memperbarui tampilan, rules tetap menolak akses yang dicabut.
 7. Authentication → Settings → Authorized domains: masukkan domain Firebase Hosting dan custom domain Anda. Gunakan reset password dari Firebase Console saat onboarding. Jangan berbagi akun antarpetugas.
+
+## Metode login
+
+Email/Password, Google, dan nomor dengan OTP tersedia pada login/signup. Menu Lainnya menyediakan penautan Google/nomor ke UID akun lama. Semua metode tetap memerlukan persetujuan usaha. Lihat [panduan Auth dan setup domain/SMS](docs/AUTH-METHODS.md); rules terbaru diperlukan untuk permohonan phone-only. SMS produksi membutuhkan paket Blaze, Authorized domains HTTPS, dan region policy Indonesia. Konfigurasi Firebase pengguna tidak diganti oleh mode QA.
 
 ## Signup usaha, persetujuan, dan invoice
 
@@ -126,4 +130,5 @@ Roadmap (belum diimplementasikan): multi-outlet, membership/loyalty, antar-jempu
 - [Firestore transaksi/getAfter](https://firebase.google.com/docs/firestore/manage-data/transactions), [Rules unit tests](https://firebase.google.com/docs/rules/unit-tests), [Firebase pricing/kuota Spark](https://firebase.google.com/pricing).
 - [Query range beberapa field](https://firebase.google.com/docs/firestore/query-data/multiple-range-fields), [agregasi count/sum dan index](https://firebase.google.com/docs/firestore/query-data/aggregation-queries).
 - [Vite PWA](https://vite-pwa-org.netlify.app/guide/), [Firebase Hosting custom domain](https://firebase.google.com/docs/hosting/custom-domain).
+
 

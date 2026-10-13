@@ -16,6 +16,7 @@ import {
 import { useSession } from "../stores/session";
 import { useSettings, useTask } from "../components/state";
 import { emulator } from "../lib/firebase";
+import AuthMethods from "../components/AuthMethods.vue";
 const session = useSession(),
   settings = useSettings(),
   router = useRouter(),
@@ -81,12 +82,26 @@ async function logout() {
             </p>
           </div>
         </div>
-        <p>{{ session.user?.email }}</p>
+        <p>{{ session.user?.email || session.user?.phoneNumber }}</p>
         <p class="field-help">
-          Akun pemilik usaha memerlukan persetujuan pengelola SoleKasir. Akses tim dikelola pemilik toko.
+          Akun pemilik usaha memerlukan persetujuan pengelola SoleKasir. Akses
+          tim dikelola pemilik toko.
         </p>
-        <p v-if="session.subscription" class="notice compact">Langganan aktif hingga {{ new Intl.DateTimeFormat('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'long' }).format(session.subscription.expiresAt.toMillis()) }}. Hubungi pengelola SoleKasir untuk perpanjangan.</p>
-        <RouterLink v-if="session.platformAdmin" to="/admin/subscriptions" class="text-link"><ShieldCheck :size="18" />Persetujuan langganan</RouterLink>
+        <p v-if="session.subscription" class="notice compact">
+          Langganan aktif hingga
+          {{
+            new Intl.DateTimeFormat("id-ID", {
+              timeZone: "Asia/Jakarta",
+              dateStyle: "long",
+            }).format(session.subscription.expiresAt.toMillis())
+          }}. Hubungi pengelola SoleKasir untuk perpanjangan.
+        </p>
+        <RouterLink
+          v-if="session.platformAdmin"
+          to="/admin/subscriptions"
+          class="text-link"
+          ><ShieldCheck :size="18" />Persetujuan langganan</RouterLink
+        >
         <p v-if="task.error.value" class="form-error">{{ task.error.value }}</p>
         <div v-if="confirm" class="confirmation">
           <strong>Keluar dari ruang kerja?</strong>
@@ -114,6 +129,57 @@ async function logout() {
         >
           <LogOut :size="18" />Keluar dari akun
         </button>
+      </section>
+      <section class="panel form-panel account-methods-panel">
+        <div class="step-heading">
+          <ShieldCheck :size="24" />
+          <div>
+            <h2>Metode masuk</h2>
+            <p>Gunakan beberapa cara untuk masuk ke akun yang sama.</p>
+          </div>
+        </div>
+        <ul class="account-provider-list">
+          <li
+            v-if="
+              session.user?.providerData.some(
+                (provider) => provider.providerId === 'password',
+              )
+            "
+          >
+            <span
+              >Email dan kata sandi<small>{{
+                session.user?.email
+              }}</small></span
+            ><span class="badge green">Terhubung</span>
+          </li>
+          <li
+            v-if="
+              session.user?.providerData.some(
+                (provider) => provider.providerId === 'google.com',
+              )
+            "
+          >
+            <span
+              >Google<small>{{
+                session.user?.providerData.find(
+                  (provider) => provider.providerId === "google.com",
+                )?.email
+              }}</small></span
+            ><span class="badge green">Terhubung</span>
+          </li>
+          <li
+            v-if="
+              session.user?.providerData.some(
+                (provider) => provider.providerId === 'phone',
+              )
+            "
+          >
+            <span
+              >Nomor telepon<small>{{ session.user?.phoneNumber }}</small></span
+            ><span class="badge green">Terhubung</span>
+          </li>
+        </ul>
+        <AuthMethods mode="link" />
       </section>
     </div>
     <section class="panel form-panel install-panel">

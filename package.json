@@ -7,13 +7,13 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "vitest run tests/domain.test.ts",
+    "test": "vitest run tests/domain.test.ts tests/auth-methods.test.ts",
     "test:rules": "node scripts/emulators.mjs test",
     "emulators": "node scripts/emulators.mjs",
     "seed": "node scripts/seed.mjs"
   },
   "dependencies": {
-    "firebase": "^12.0.0",
+    "firebase": "^12.19.0",
     "jspdf": "^4.2.1",
     "lucide-vue-next": "^0.468.0",
     "pinia": "^3.0.0",

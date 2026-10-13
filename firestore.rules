@@ -250,10 +250,14 @@ service cloud.firestore {
     && getAfter(/databases/$(database)/documents/applications/$(uid)).data.status=='approved'
     && getAfter(/databases/$(database)/documents/applications/$(uid)).data.storeId==request.resource.data.storeId;
   }
+  function applicantIdentity(d) {
+   let email=request.auth.token.get('email',''); let phone=request.auth.token.get('phone_number','');
+   return email!='' ? d.email==email : (phone!='' && '+'+d.phone==phone);
+  }
   match /applications/{uid} {
    allow get: if (request.auth!=null && request.auth.uid==uid) || platformAdmin(); allow list: if platformAdmin();
    allow create: if request.auth!=null && request.auth.uid==uid && validApplication(request.resource.data)
-    && request.resource.data.email==request.auth.token.email && request.resource.data.status=='pending' && request.resource.data.storeId==''
+    && applicantIdentity(request.resource.data) && request.resource.data.status=='pending' && request.resource.data.storeId==''
     && request.resource.data.reason=='' && request.resource.data.reviewedAt==null && request.resource.data.reviewedBy=='' && request.resource.data.createdAt==request.time;
    allow update: if platformAdmin() && validApplication(request.resource.data) && resource.data.status=='pending'
     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status','storeId','reason','reviewedAt','reviewedBy'])
