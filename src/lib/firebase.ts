@@ -10,7 +10,7 @@ export const emulator = env.VITE_USE_EMULATORS === "true";
 export const configured =
   emulator ||
   !!(
-    env.VITE_FIREBASE_API_KEY &&
+    env.FIREBASE_API_KEY &&
     env.VITE_FIREBASE_PROJECT_ID &&
     env.VITE_FIREBASE_APP_ID
   );
@@ -20,7 +20,7 @@ export function setStoreId(value: string) {
   storeId = value;
 }
 const app = initializeApp({
-  apiKey: env.VITE_FIREBASE_API_KEY || "demo-key",
+  apiKey: env.FIREBASE_API_KEY || "demo-key",
   authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || "demo-solekasir.firebaseapp.com",
   projectId: env.VITE_FIREBASE_PROJECT_ID || "demo-solekasir",
   appId: env.VITE_FIREBASE_APP_ID || "demo-app",
